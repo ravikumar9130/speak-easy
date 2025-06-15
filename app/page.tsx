@@ -539,8 +539,8 @@ export default function Home() {
         {notification && (
           <Alert className="mb-6 border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-200">
             <Bell className="h-4 w-4" />
-            <AlertDescription className="text-lg font-medium">
-              🔔 {notification}
+            <AlertDescription className="text-lg flex items-center font-medium">
+              {notification}
             </AlertDescription>
           </Alert>
         )}
