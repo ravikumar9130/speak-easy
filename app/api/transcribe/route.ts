@@ -12,20 +12,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get audio data as ArrayBuffer and create Buffer
+    // Get audio data as ArrayBuffer
     const arrayBuffer = await audioFile.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Send raw binary data to Hugging Face
+    // Send to Hugging Face with explicit format information
     const response = await fetch(
       'https://api-inference.huggingface.co/models/openai/whisper-large-v3',
       {
         headers: {
           Authorization: `Bearer ${process.env.HUGGING_FACE_API_KEY}`,
-          'Content-Type': audioFile.type || 'audio/webm' // Use the file's content type
+          'Content-Type': 'audio/webm',
+          'Accept': 'application/json'
         },
         method: 'POST',
-        body: buffer // Send the raw binary data
+        body: buffer
       }
     );
 
