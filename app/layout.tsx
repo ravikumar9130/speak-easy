@@ -88,6 +88,7 @@ export default function RootLayout({
           <main role="main" aria-label="SpeakEasy Main Content" className="min-h-screen">
             {children}
           </main>
+          
         </ThemeProvider>
       </body>
     </html>
