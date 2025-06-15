@@ -183,19 +183,37 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
   }, [isAIListening, isListening]);
 
   const stopAIListening = useCallback(() => {
+    // First update the state to ensure UI responds immediately
+    setIsAIListening(false);
+    
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+  
+    // Only then try to stop the recorder
+    if (mediaRecorderRef.current) {
       try {
-        mediaRecorderRef.current.stop();
+        // Only try to stop if it's recording
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        } else {
+          // Ensure we clean up even if not recording
+          setIsProcessing(false);
+          
+          // Ensure stream tracks are stopped
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
+        }
       } catch (err) {
         console.error('Error stopping AI recording:', err);
-        setIsAIListening(false);
         setIsProcessing(false);
       }
+    } else {
+      // If no recorder exists, just reset the state
+      setIsProcessing(false);
     }
   }, []);
 
@@ -261,10 +279,6 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
             case 'not-allowed':
               setError('Microphone permission denied. Please enable microphone access in your browser settings.');
               break;
-            case 'network':
-              setError('Network error. Switching to AI transcription...');
-              setTimeout(() => startAIListening(), 500);
-              break;
             case 'service-not-allowed':
               setError('Speech service not allowed. Using AI transcription...');
               setTimeout(() => startAIListening(), 500);
@@ -274,7 +288,6 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
               setTimeout(() => startAIListening(), 500);
               break;
             default:
-              setError(`Recognition failed: ${event.error}. Trying AI transcription...`);
               setTimeout(() => startAIListening(), 500);
           }
         };

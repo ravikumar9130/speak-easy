@@ -410,10 +410,37 @@ export default function Home() {
   };
 
   const handleVoiceInput = () => {
-    if (isListening) {
-      stopListening();
-    } else if (isAIListening) {
-      stopAIListening();
+      // Play different sounds for start vs stop
+  try {
+      if (isListening || isAIListening) {
+        // Stopping - play stop sound
+        const audio = new Audio('/record.wav');
+        audio.play().catch(err => console.log('Audio play error:', err));
+      } else {
+        // Starting - play start sound
+        const audio = new Audio('/record-start.mp3');        
+        audio.play().catch(err => console.log('Audio play error:', err));
+      }
+    } catch (error) {
+      console.log('Audio notification attempted');
+    }
+
+    if (isListening || isAIListening) {
+      // First update UI state locally to be more responsive
+      if (isListening) {
+        stopListening();
+      } else {
+        stopAIListening();
+      }
+      
+      // Add short timeout to ensure state changes propagate
+      setTimeout(() => {
+        if (isListening || isAIListening) {
+          console.log('Forcing stop of recording');
+          stopListening();
+          stopAIListening();
+        }
+      }, 300);
     } else {
       // Try Web Speech API first, fallback to AI if not supported
       if (isSupported && isOnline) {
@@ -557,7 +584,7 @@ export default function Home() {
               <Input
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
-                placeholder="Type your reminder here (e.g., 'Remind me to drink water every 2 hours')"
+                placeholder="Type your reminder here (e.g., 'Take medication in 30 minutes')"
                 className="text-base sm:text-lg p-4 h-12 sm:h-14 border-2 focus:border-blue-500 transition-colors"
                 onKeyDown={(e) => e.key === 'Enter' && createReminder()}
               />
@@ -597,7 +624,7 @@ export default function Home() {
                   <p>🤖 Using AI voice recognition</p>
                 )}
                 {isSupported && isOnline && (
-                  <p>🎤 Web Speech API + AI fallback available</p>
+                  <p>🤖 Using AI voice recognition</p>
                 )}
               </div>
             </div>
@@ -721,8 +748,8 @@ export default function Home() {
               <div>
                 <h4 className="font-semibold mb-2">Voice Commands:</h4>
                 <ul className="space-y-1 list-disc list-inside">
-                  <li>&ldquo;Remind me to drink water every 2 hours&rdquo;</li>
                   <li>&ldquo;Take medication in 30 minutes&rdquo;</li>
+                  <li>&ldquo;Remind me to drink water after 2 hours&rdquo;</li>
                   <li>&ldquo;Call mom every 3 hours&rdquo;</li>
                   <li>&ldquo;Exercise every day&rdquo;</li>
                 </ul>
@@ -730,7 +757,7 @@ export default function Home() {
               <div>
                 <h4 className="font-semibold mb-2">Features:</h4>
                 <ul className="space-y-1 list-disc list-inside">
-                  <li>🎤 Web Speech API + AI fallback</li>
+                  <li>🤖 Using AI voice recognition</li>
                   <li>🔔 Visual & audio notifications</li>
                   <li>📱 PWA - Install as app</li>
                   <li>🌙 Dark/Light mode</li>
