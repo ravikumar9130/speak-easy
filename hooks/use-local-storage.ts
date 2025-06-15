@@ -2,10 +2,21 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
-export function useLocalStorage<T>(key: string, initialValue: T) {
+export function useLocalStorage<T>(
+  key: string, 
+  initialValue: T, 
+  options?: {
+    serializer?: (value: T) => string;
+    deserializer?: (value: string) => T;
+  }
+) {
   // State to store our value
   const [storedValue, setStoredValue] = useState<T>(initialValue);
   const [isLoaded, setIsLoaded] = useState(false);
+
+  // Default serializer/deserializer
+  const serialize = options?.serializer || JSON.stringify;
+  const deserialize = options?.deserializer || JSON.parse;
 
   // Load value from localStorage on mount
   useEffect(() => {
@@ -13,7 +24,7 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
       if (typeof window !== 'undefined') {
         const item = window.localStorage.getItem(key);
         if (item) {
-          const parsed = JSON.parse(item);
+          const parsed = deserialize(item);
           setStoredValue(parsed);
         }
         setIsLoaded(true);
@@ -22,7 +33,7 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
       console.error(`Error loading localStorage key "${key}":`, error);
       setIsLoaded(true);
     }
-  }, [key]);
+  }, [key, deserialize]);
 
   // Return a wrapped version of useState's setter function that persists the new value to localStorage
   const setValue = useCallback((value: T | ((val: T) => T)) => {
@@ -35,7 +46,7 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
       
       // Save to local storage
       if (typeof window !== 'undefined') {
-        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        window.localStorage.setItem(key, serialize(valueToStore));
         
         // Dispatch custom event to sync across tabs/components
         window.dispatchEvent(new CustomEvent('localStorage', {
@@ -45,7 +56,7 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
     } catch (error) {
       console.error(`Error setting localStorage key "${key}":`, error);
     }
-  }, [key, storedValue]);
+  }, [key, serialize, storedValue]);
 
   // Listen for changes from other tabs/components
   useEffect(() => {
@@ -58,7 +69,7 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
     const handleNativeStorageChange = (e: StorageEvent) => {
       if (e.key === key && e.newValue) {
         try {
-          setStoredValue(JSON.parse(e.newValue));
+          setStoredValue(deserialize(e.newValue));
         } catch (error) {
           console.error('Error parsing storage event:', error);
         }
@@ -76,7 +87,7 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
         window.removeEventListener('storage', handleNativeStorageChange);
       }
     };
-  }, [key]);
+  }, [key, deserialize]);
 
   return [storedValue, setValue, isLoaded] as const;
 }

@@ -35,7 +35,7 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
   // Initialize Web Speech API
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       
       if (SpeechRecognition) {
         setIsSupported(true);
@@ -120,7 +120,7 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
           }
         };
 
-        recognitionRef.current = recognition;
+        recognitionRef.current = recognition as SpeechRecognition | null;
       } else {
         setIsSupported(false);
         setError('Speech recognition not supported. Using AI transcription.');

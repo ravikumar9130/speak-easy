@@ -167,73 +167,24 @@ export default function Home() {
     }
   }, []);
 
-  // Restore active reminders on load
+    // Convert string dates to Date objects after loading
   useEffect(() => {
     if (isRemindersLoaded && reminders.length > 0) {
-      const updatedReminders = reminders.map(reminder => {
-        if (reminder.isActive) {
-          // Clear any existing timer
-          if (reminder.timerId) {
-            clearInterval(reminder.timerId);
-          }
-          
-          // Calculate next reminder time
-          const now = new Date();
-          const nextReminder = new Date(reminder.nextReminder);
-          const timeUntilNext = nextReminder.getTime() - now.getTime();
-          
-          if (timeUntilNext > 0) {
-            // Set timer for the next reminder
-            const timerId = setTimeout(() => {
-              showNotification(reminder.text);
-              // Set up recurring timer
-              const recurringTimerId = setInterval(() => {
-                showNotification(reminder.text);
-                setReminders(prev => prev.map(r => 
-                  r.id === reminder.id 
-                    ? { ...r, nextReminder: new Date(Date.now() + r.intervalMs) }
-                    : r
-                ));
-              }, reminder.intervalMs);
-              
-              // Update the reminder with the new recurring timer
-              setReminders(prev => prev.map(r => 
-                r.id === reminder.id 
-                  ? { 
-                      ...r, 
-                      timerId: recurringTimerId,
-                      nextReminder: new Date(Date.now() + r.intervalMs) 
-                    }
-                  : r
-              ));
-            }, timeUntilNext);
-            
-            return { ...reminder, timerId };
-          } else {
-            // Time has passed, start immediately
-            showNotification(reminder.text);
-            const timerId = setInterval(() => {
-              showNotification(reminder.text);
-              setReminders(prev => prev.map(r => 
-                r.id === reminder.id 
-                  ? { ...r, nextReminder: new Date(Date.now() + r.intervalMs) }
-                  : r
-              ));
-            }, reminder.intervalMs);
-            
-            return { 
-              ...reminder, 
-              timerId,
-              nextReminder: new Date(Date.now() + reminder.intervalMs) 
-            };
-          }
-        }
-        return reminder;
-      });
+      const convertedReminders = reminders.map(reminder => ({
+        ...reminder,
+        nextReminder: reminder.nextReminder instanceof Date ? 
+          reminder.nextReminder : new Date(reminder.nextReminder),
+        createdAt: reminder.createdAt instanceof Date ? 
+          reminder.createdAt : new Date(reminder.createdAt)
+      }));
       
-      setReminders(updatedReminders);
+      // Only update if needed
+      const needsUpdate = JSON.stringify(reminders) !== JSON.stringify(convertedReminders);
+      if (needsUpdate) {
+        setReminders(convertedReminders);
+      }
     }
-  }, [isRemindersLoaded]);
+  }, [isRemindersLoaded, reminders, setReminders]);
 
   const parseReminderInput = async (input: string) => {
     try {
@@ -434,6 +385,7 @@ export default function Home() {
       return 'Soon';
     }
   };
+  
 
   const getVoiceButtonText = () => {
     if (isProcessing) return 'Processing...';
