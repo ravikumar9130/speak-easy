@@ -264,7 +264,6 @@ export default function Home() {
         body: text,
         icon: '/icons/icon-192x192.png',
         badge: '/icons/icon-96x96.png',
-        vibrate: [200, 100, 200],
         tag: 'speakeasy-reminder'
       });
     }
@@ -493,7 +492,7 @@ export default function Home() {
                 onChange={(e) => setTextInput(e.target.value)}
                 placeholder="Type your reminder here (e.g., 'Remind me to drink water every 2 hours')"
                 className="text-base sm:text-lg p-4 h-12 sm:h-14 border-2 focus:border-blue-500 transition-colors"
-                onKeyPress={(e) => e.key === 'Enter' && createReminder()}
+                onKeyDown={(e) => e.key === 'Enter' && createReminder()}
               />
               
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -596,7 +595,7 @@ export default function Home() {
                         </h3>
                         
                         <p className="text-gray-600 dark:text-gray-400 italic text-sm sm:text-base break-words">
-                          "{reminder.originalInput}"
+                          &quot;{reminder.originalInput}&quot;
                         </p>
                         
                         {reminder.isActive && (
@@ -655,10 +654,10 @@ export default function Home() {
               <div>
                 <h4 className="font-semibold mb-2">Voice Commands:</h4>
                 <ul className="space-y-1 list-disc list-inside">
-                  <li>"Remind me to drink water every 2 hours"</li>
-                  <li>"Take medication in 30 minutes"</li>
-                  <li>"Call mom every 3 hours"</li>
-                  <li>"Exercise every day"</li>
+                  <li>&ldquo;Remind me to drink water every 2 hours&rdquo;</li>
+                  <li>&ldquo;Take medication in 30 minutes&rdquo;</li>
+                  <li>&ldquo;Call mom every 3 hours&rdquo;</li>
+                  <li>&ldquo;Exercise every day&rdquo;</li>
                 </ul>
               </div>
               <div>
