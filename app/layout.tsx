@@ -74,20 +74,14 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-       <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#3B82F6" />
       </head>
       <body className={`${inter.className} antialiased`}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange={false}
-        >
+        <ThemeProvider>
           <main role="main" aria-label="SpeakEasy Main Content" className="min-h-screen">
             {children}
           </main>
-          
         </ThemeProvider>
       </body>
     </html>

@@ -39,7 +39,9 @@ export function useLocalStorage<T>(
   const setValue = useCallback((value: T | ((val: T) => T)) => {
     try {
       // Allow value to be a function so we have the same API as useState
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
+      const valueToStore = value instanceof Function 
+        ? value(storedValue) // We must use the function form but not add storedValue as a dependency
+        : value;
       
       // Save state
       setStoredValue(valueToStore);
@@ -56,7 +58,7 @@ export function useLocalStorage<T>(
     } catch (error) {
       console.error(`Error setting localStorage key "${key}":`, error);
     }
-  }, [key, serialize, storedValue]);
+  }, [key, serialize]);
 
   // Listen for changes from other tabs/components
   useEffect(() => {

@@ -32,6 +32,173 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
   const streamRef = useRef<MediaStream | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const startAIListening = useCallback(async () => {
+    if (isAIListening || isListening) return;
+
+    try {
+      setIsAIListening(true);
+      setIsProcessing(false);
+      setError(null);
+      setTranscript('');
+      setConfidence(0);
+
+      // Check for MediaRecorder support
+      if (!window.MediaRecorder) {
+        throw new Error('MediaRecorder not supported in this browser');
+      }
+
+      // Request microphone access with better constraints
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000,
+          channelCount: 1
+        } 
+      });
+      
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      // Determine best audio format
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/webm';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'audio/mp4';
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = '';
+          }
+        }
+      }
+
+      // Create MediaRecorder with better settings
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: mimeType || undefined,
+        audioBitsPerSecond: 128000
+      });
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        setIsProcessing(true);
+        
+        try {
+          const audioBlob = new Blob(audioChunksRef.current, { 
+            type: mimeType || 'audio/webm' 
+          });
+          
+          // Check if we have audio data
+          if (audioBlob.size === 0) {
+            throw new Error('No audio data recorded');
+          }
+
+          // Send to transcription API
+          const formData = new FormData();
+          formData.append('audio', audioBlob, 'recording.webm');
+
+          const response = await fetch('/api/transcribe', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Transcription failed');
+          }
+
+          const result = await response.json();
+          if (result.text && result.text.trim()) {
+            setTranscript(result.text.trim());
+            setConfidence(result.confidence || 0.9);
+            setError(null);
+          } else {
+            throw new Error('No speech detected in the recording');
+          }
+        } catch (err) {
+          console.error('Transcription error:', err);
+          setError(err instanceof Error ? err.message : 'Failed to process audio');
+        } finally {
+          setIsProcessing(false);
+          setIsAIListening(false);
+          
+          // Cleanup
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
+        }
+      };
+
+      mediaRecorder.onerror = (event) => {
+        console.error('MediaRecorder error:', event);
+        setError('Recording failed. Please try again.');
+        setIsAIListening(false);
+        setIsProcessing(false);
+        
+        // Cleanup
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
+      };
+
+      // Start recording with smaller chunks for better reliability
+      mediaRecorder.start(1000);
+      
+      // Auto-stop after 15 seconds
+      const stopTimeout = setTimeout(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          stopAIListening();
+        }
+      }, 15000);
+
+      // Store timeout reference for cleanup
+      timeoutRef.current = stopTimeout;
+
+    } catch (err) {
+      console.error('AI listening error:', err);
+      if (err instanceof Error) {
+        if (err.name === 'NotAllowedError') {
+          setError('Microphone permission denied. Please enable microphone access in your browser settings.');
+        } else if (err.name === 'NotFoundError') {
+          setError('No microphone found. Please connect a microphone and try again.');
+        } else if (err.name === 'NotSupportedError') {
+          setError('Audio recording not supported in this browser.');
+        } else {
+          setError(`Microphone error: ${err.message}`);
+        }
+      } else {
+        setError('Failed to access microphone. Please try again.');
+      }
+      setIsAIListening(false);
+      setIsProcessing(false);
+    }
+  }, [isAIListening, isListening]);
+
+  const stopAIListening = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (err) {
+        console.error('Error stopping AI recording:', err);
+        setIsAIListening(false);
+        setIsProcessing(false);
+      }
+    }
+  }, []);
+
   // Initialize Web Speech API
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -126,7 +293,7 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
         setError('Speech recognition not supported. Using AI transcription.');
       }
     }
-  }, []);
+  }, [startAIListening]); // Add startAIListening to dependencies
 
   const startListening = useCallback(() => {
     if (recognitionRef.current && !isListening && !isAIListening) {
@@ -143,7 +310,7 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
     } else if (!isSupported) {
       startAIListening();
     }
-  }, [isListening, isAIListening, isSupported]);
+  }, [isListening, isAIListening, isSupported, startAIListening]);
 
   const stopListening = useCallback(() => {
     if (timeoutRef.current) {
@@ -160,156 +327,6 @@ export const useVoiceRecognition = (): VoiceRecognitionHook => {
       }
     }
   }, [isListening]);
-
-  const startAIListening = useCallback(async () => {
-    if (isAIListening || isListening) return;
-
-    try {
-      setIsAIListening(true);
-      setIsProcessing(false);
-      setError(null);
-      setTranscript('');
-      setConfidence(0);
-
-      // Check for MediaRecorder support
-      if (!window.MediaRecorder) {
-        throw new Error('MediaRecorder not supported in this browser');
-      }
-
-      // Request microphone access with better constraints
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 16000,
-          channelCount: 1
-        } 
-      });
-      
-      streamRef.current = stream;
-      audioChunksRef.current = [];
-
-      // Determine best audio format
-      let mimeType = 'audio/webm;codecs=opus';
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'audio/webm';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'audio/mp4';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = '';
-          }
-        }
-      }
-
-      // Create MediaRecorder
-      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        setIsProcessing(true);
-        
-        try {
-          const audioBlob = new Blob(audioChunksRef.current, { 
-            type: mimeType || 'audio/webm' 
-          });
-          
-          // Check if we have audio data
-          if (audioBlob.size === 0) {
-            throw new Error('No audio data recorded');
-          }
-
-          // Send to AI transcription
-          const formData = new FormData();
-          formData.append('audio', audioBlob, 'recording.webm');
-
-          const response = await fetch('/api/transcribe', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (response.ok) {
-            const result = await response.json();
-            if (result.text && result.text.trim()) {
-              setTranscript(result.text.trim());
-              setConfidence(result.confidence || 0.9);
-              setError(null);
-            } else {
-              setError('No speech detected in the recording. Please try again.');
-            }
-          } else {
-            const errorData = await response.json();
-            setError(`AI transcription failed: ${errorData.error || 'Unknown error'}`);
-          }
-        } catch (err) {
-          console.error('AI transcription error:', err);
-          setError('Failed to process audio. Please check your internet connection and try again.');
-        } finally {
-          setIsProcessing(false);
-        }
-
-        // Cleanup
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
-        setIsAIListening(false);
-      };
-
-      mediaRecorder.onerror = (event) => {
-        console.error('MediaRecorder error:', event);
-        setError('Recording failed. Please try again.');
-        setIsAIListening(false);
-        setIsProcessing(false);
-      };
-
-      // Start recording
-      mediaRecorder.start(1000); // Collect data every second
-      
-      // Auto-stop after 15 seconds
-      setTimeout(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-          stopAIListening();
-        }
-      }, 15000);
-
-    } catch (err) {
-      console.error('AI listening error:', err);
-      if (err instanceof Error) {
-        if (err.name === 'NotAllowedError') {
-          setError('Microphone permission denied. Please enable microphone access in your browser settings.');
-        } else if (err.name === 'NotFoundError') {
-          setError('No microphone found. Please connect a microphone and try again.');
-        } else if (err.name === 'NotSupportedError') {
-          setError('Audio recording not supported in this browser.');
-        } else {
-          setError(`Microphone error: ${err.message}`);
-        }
-      } else {
-        setError('Failed to access microphone. Please try again.');
-      }
-      setIsAIListening(false);
-      setIsProcessing(false);
-    }
-  }, [isAIListening, isListening]);
-
-  const stopAIListening = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (err) {
-        console.error('Error stopping AI recording:', err);
-        setIsAIListening(false);
-        setIsProcessing(false);
-      }
-    }
-  }, []);
 
   const resetTranscript = useCallback(() => {
     setTranscript('');

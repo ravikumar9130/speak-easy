@@ -4,6 +4,7 @@ interface ParsedReminder {
   text: string;
   intervalMs: number;
   intervalText: string;
+  type: 'one-time' | 'recurring';
 }
 
 export async function POST(request: NextRequest) {
@@ -43,6 +44,7 @@ function parseReminderInput(input: string): ParsedReminder {
   let intervalMs = 300000; // Default 5 minutes
   let intervalText = '5 minutes';
   let matchFound = false;
+  let type: 'one-time' | 'recurring' = 'recurring';
 
   // Try each pattern
   for (const pattern of timePatterns) {
@@ -51,6 +53,11 @@ function parseReminderInput(input: string): ParsedReminder {
       matchFound = true;
       const value = parseInt(match[1]);
       const unit = match[2].toLowerCase();
+      
+      // Check if it's a one-time reminder
+      if (input.toLowerCase().includes('in ') || input.toLowerCase().includes('after ')) {
+        type = 'one-time';
+      }
       
       if (unit.startsWith('sec')) {
         intervalMs = Math.max(value * 1000, 5000); // Minimum 5 seconds
@@ -118,6 +125,7 @@ function parseReminderInput(input: string): ParsedReminder {
   return {
     text,
     intervalMs,
-    intervalText
+    intervalText,
+    type
   };
 }

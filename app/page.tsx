@@ -37,6 +37,7 @@ interface Reminder {
   nextReminder: Date;
   timerId?: NodeJS.Timeout;
   createdAt: Date;
+  type: 'one-time' | 'recurring';
 }
 
 interface BeforeInstallPromptEvent extends Event {
@@ -82,18 +83,172 @@ export default function Home() {
     isProcessing
   } = useVoiceRecognition();
 
-  // Monitor online status
+  const showNotification = useCallback((text: string) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('SpeakEasy Reminder', {
+        body: text,
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/icon-96x96.png',
+        tag: 'speakeasy-reminder'
+      });
+    }
+    
+    playNotificationSound();
+    setNotification(text);
+    setTimeout(() => setNotification(''), 1000);
+  }, []);
+
+  // Convert string dates to Date objects after loading
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    if (!isRemindersLoaded) return;
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    setIsOnline(navigator.onLine);
+    const convertedReminders = reminders.map(reminder => ({
+      ...reminder,
+      nextReminder: reminder.nextReminder instanceof Date ? 
+        reminder.nextReminder : new Date(reminder.nextReminder),
+      createdAt: reminder.createdAt instanceof Date ? 
+        reminder.createdAt : new Date(reminder.createdAt)
+    }));
+    
+    // Only update if needed
+    const needsUpdate = JSON.stringify(reminders) !== JSON.stringify(convertedReminders);
+    if (needsUpdate) {
+      setReminders(convertedReminders);
+    }
+  }, [isRemindersLoaded]);
 
+  const createReminder = useCallback(async () => {
+    if (!textInput.trim()) return;
+    
+    setError('');
+    const parsed = await parseReminderInput(textInput);
+    
+    const reminder: Reminder = {
+      id: Date.now().toString(),
+      text: parsed.text,
+      originalInput: textInput,
+      intervalMs: parsed.intervalMs,
+      intervalText: parsed.intervalText,
+      isActive: true,
+      nextReminder: new Date(Date.now() + parsed.intervalMs),
+      createdAt: new Date(),
+      type: parsed.type || 'recurring'
+    };
+    
+    // Create a wrapper function for showNotification that doesn't use setReminders
+    const handleNotification = (id: string, text: string) => {
+      showNotification(text);
+      
+      // Instead of setState inside the timeout/interval, use a custom event
+      window.dispatchEvent(new CustomEvent('reminderTriggered', {
+        detail: { id, time: Date.now() }
+      }));
+    };
+    
+    // Create timer outside of setState
+    let timerId: NodeJS.Timeout;
+    
+    if (reminder.type === 'one-time') {
+      timerId = setTimeout(() => {
+        handleNotification(reminder.id, reminder.text);
+      }, parsed.intervalMs);
+    } else {
+      timerId = setInterval(() => {
+        handleNotification(reminder.id, reminder.text);
+      }, parsed.intervalMs)
+    }
+    
+    // Add timerId after creating it
+    reminder.timerId = timerId;
+    
+    // Update state once with the complete reminder
+    setReminders(prev => [...prev, reminder]);
+    setTextInput('');
+  }, [textInput, showNotification]);
+
+  useEffect(() => {
+    const handleReminderTriggered = (e: CustomEvent) => {
+      const { id, time } = e.detail;
+      
+      setReminders(prev => {
+        const reminder = prev.find(r => r.id === id);
+        if (!reminder) return prev;
+        
+        if (reminder.type === 'one-time') {
+          // Remove the one-time reminder
+          return prev.filter(r => r.id !== id);
+        } else {
+          // Update the recurring reminder's next time
+          return prev.map(r => 
+            r.id === id 
+              ? { ...r, nextReminder: new Date(time + r.intervalMs) }
+              : r
+          );
+        }
+      });
+    };
+    
+    window.addEventListener('reminderTriggered', handleReminderTriggered as EventListener);
+    
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('reminderTriggered', handleReminderTriggered as EventListener);
+    };
+  }, [reminders]);
+
+  const toggleReminder = useCallback((id: string) => {
+    setReminders(prev => prev.map(reminder => {
+      if (reminder.id === id) {
+        if (reminder.isActive && reminder.timerId) {
+          clearInterval(reminder.timerId);
+          return { ...reminder, isActive: false, timerId: undefined };
+        } else if (!reminder.isActive) {
+          const timerId = setInterval(() => {
+            showNotification(reminder.text);
+            setReminders(current => current.map(r => 
+              r.id === id 
+                ? { ...r, nextReminder: new Date(Date.now() + r.intervalMs) }
+                : r
+            ));
+          }, reminder.intervalMs);
+          
+          return { 
+            ...reminder, 
+            isActive: true, 
+            timerId,
+            nextReminder: new Date(Date.now() + reminder.intervalMs) 
+          };
+        }
+      }
+      return reminder;
+    }));
+  }, [showNotification, setReminders]);
+
+  const deleteReminder = useCallback((id: string) => {
+    setReminders(prev => {
+      const reminder = prev.find(r => r.id === id);
+      if (reminder?.timerId) {
+        if (reminder.type === 'one-time') {
+          clearTimeout(reminder.timerId);
+        } else {
+          clearInterval(reminder.timerId);
+        }
+      }
+      return prev.filter(r => r.id !== id);
+    });
+  }, [setReminders]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      reminders.forEach(reminder => {
+        if (reminder.timerId) {
+          if (reminder.type === 'one-time') {
+            clearTimeout(reminder.timerId);
+          } else {
+            clearInterval(reminder.timerId);
+          }
+        }
+      });
     };
   }, []);
 
@@ -112,6 +267,21 @@ export default function Home() {
       setTimeout(() => setError(''), 5000);
     }
   }, [voiceError]);
+
+  // Monitor online status
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    setIsOnline(navigator.onLine);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // PWA Install prompt handling
   useEffect(() => {
@@ -135,18 +305,6 @@ export default function Home() {
     };
   }, []);
 
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-      setIsInstallable(false);
-    }
-  };
-
   // Request notification permission
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -167,24 +325,17 @@ export default function Home() {
     }
   }, []);
 
-    // Convert string dates to Date objects after loading
-  useEffect(() => {
-    if (isRemindersLoaded && reminders.length > 0) {
-      const convertedReminders = reminders.map(reminder => ({
-        ...reminder,
-        nextReminder: reminder.nextReminder instanceof Date ? 
-          reminder.nextReminder : new Date(reminder.nextReminder),
-        createdAt: reminder.createdAt instanceof Date ? 
-          reminder.createdAt : new Date(reminder.createdAt)
-      }));
-      
-      // Only update if needed
-      const needsUpdate = JSON.stringify(reminders) !== JSON.stringify(convertedReminders);
-      if (needsUpdate) {
-        setReminders(convertedReminders);
-      }
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setIsInstallable(false);
     }
-  }, [isRemindersLoaded, reminders, setReminders]);
+  };
 
   const parseReminderInput = async (input: string) => {
     try {
@@ -204,7 +355,7 @@ export default function Home() {
     }
   };
 
-  const parseReminderClient = (input: string): { text: string; intervalMs: number; intervalText: string } => {
+  const parseReminderClient = (input: string): { text: string; intervalMs: number; intervalText: string; type?: 'one-time' | 'recurring' } => {
     const timeRegex = /(?:in|after|every)\s*(\d+)\s*(minutes?|mins?|hours?|hrs?|seconds?|secs?)/i;
     const match = input.match(timeRegex);
     
@@ -244,102 +395,18 @@ export default function Home() {
     // Capitalize first letter
     text = text.charAt(0).toUpperCase() + text.slice(1);
     
-    return { text, intervalMs, intervalText };
+    return { text, intervalMs, intervalText, type: input.includes('one-time') ? 'one-time' : 'recurring' };
   };
 
   const playNotificationSound = () => {
     try {
-      const audio = new Audio('/notification.mp3');
+      const audio = new Audio('/notification.wav');
       audio.play().catch(() => {
         console.log('Audio notification attempted');
       });
     } catch (error) {
       console.log('Audio notification attempted');
     }
-  };
-
-  const showNotification = useCallback((text: string) => {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('SpeakEasy Reminder', {
-        body: text,
-        icon: '/icons/icon-192x192.png',
-        badge: '/icons/icon-96x96.png',
-        tag: 'speakeasy-reminder'
-      });
-    }
-    
-    playNotificationSound();
-    setNotification(text);
-    setTimeout(() => setNotification(''), 5000);
-  }, []);
-
-  const createReminder = async () => {
-    if (!textInput.trim()) return;
-    
-    setError('');
-    const parsed = await parseReminderInput(textInput);
-    
-    const reminder: Reminder = {
-      id: Date.now().toString(),
-      text: parsed.text,
-      originalInput: textInput,
-      intervalMs: parsed.intervalMs,
-      intervalText: parsed.intervalText,
-      isActive: true,
-      nextReminder: new Date(Date.now() + parsed.intervalMs),
-      createdAt: new Date()
-    };
-    
-    const timerId = setInterval(() => {
-      showNotification(reminder.text);
-      setReminders(prev => prev.map(r => 
-        r.id === reminder.id 
-          ? { ...r, nextReminder: new Date(Date.now() + r.intervalMs) }
-          : r
-      ));
-    }, parsed.intervalMs);
-    
-    reminder.timerId = timerId;
-    setReminders(prev => [...prev, reminder]);
-    setTextInput('');
-  };
-
-  const toggleReminder = (id: string) => {
-    setReminders(prev => prev.map(reminder => {
-      if (reminder.id === id) {
-        if (reminder.isActive && reminder.timerId) {
-          clearInterval(reminder.timerId);
-          return { ...reminder, isActive: false, timerId: undefined };
-        } else if (!reminder.isActive) {
-          const timerId = setInterval(() => {
-            showNotification(reminder.text);
-            setReminders(current => current.map(r => 
-              r.id === id 
-                ? { ...r, nextReminder: new Date(Date.now() + r.intervalMs) }
-                : r
-            ));
-          }, reminder.intervalMs);
-          
-          return { 
-            ...reminder, 
-            isActive: true, 
-            timerId,
-            nextReminder: new Date(Date.now() + reminder.intervalMs) 
-          };
-        }
-      }
-      return reminder;
-    }));
-  };
-
-  const deleteReminder = (id: string) => {
-    setReminders(prev => {
-      const reminder = prev.find(r => r.id === id);
-      if (reminder?.timerId) {
-        clearInterval(reminder.timerId);
-      }
-      return prev.filter(r => r.id !== id);
-    });
   };
 
   const handleVoiceInput = () => {
